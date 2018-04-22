@@ -1,12 +1,13 @@
 return PlaceObj('ModDef', {
-	'title', "Better Logistics",
-	'description', "Truck rovers automatically check for resource demand on remote depots and deliver cargo",
+	'title', "Auto Cargo",
+	'description', "RCTransports automatically transfer resources between storage depots.",
 	'id', "hsBOMDQ",
 	'author', "MachaQueso",
 	'version', 3,
 	'lua_revision', 228722,
 	'code', {
-		"Code/AutoTransport.lua",
+		"Code/AutoCargo.lua",
+		"Code/AutoCargoManager.lua",
 	},
 	'saved', 1523055678,
 })
