@@ -30,7 +30,7 @@ local function AddDemandDepot(task)
 	end
 end
 
-function AutoCargoManager:GetTransportTask()
+function AutoCargoManager:FindTransportTask()
 	self.supply_queue = {}
 	self.demand_queue = {}
 
