@@ -5,9 +5,9 @@ This is a repository of my mods for [Surviving Mars](http://store.steampowered.c
 
 # Mods
 
-## AutoTransport
+## AutoCargo
 
-RC Transports automatically move cargo between storage depots.
+RC Transports automatically move resources between storage depots.
 
 # Planned mods (feel free to steal these ideas from me :-)
 
