@@ -7,7 +7,6 @@ return PlaceObj('ModDef', {
 	'lua_revision', 228722,
 	'code', {
 		"Code/AutoCargo.lua",
-		"Code/AutoCargoManager.lua",
 	},
 	'saved', 1523055678,
 })

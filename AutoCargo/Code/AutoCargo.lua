@@ -318,7 +318,7 @@ function AutoCargo:FindTransportTask()
                         transport_task.destination = demand.depot
                         transport_task.resource = resource
                         transport_task.amount = amount
-                        lcPrint("Assigning task")
+                        lcPrint("Assigning+ task")
                         return transport_task
                     end
                 end
