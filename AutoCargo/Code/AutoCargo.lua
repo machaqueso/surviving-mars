@@ -115,13 +115,13 @@ function AutoCargo:DoTasks()
     ForEach {
         class = "RCTransport",
         exec = function(rover)
-            lcPrint(rover.command)
+            --lcPrint(rover.command)
             if rover.auto_cargo and rover.command == "Idle" then
                 if not rover.auto_cargo_task then
-                    lcPrint("getting task")
+                    --lcPrint("getting task")
                     local task = AutoCargo:FindTransportTask(rover)
                     if (task) then
-                        lcPrint("got task")
+                        --lcPrint("got task")
                         rover.auto_cargo_task = task
                         AutoCargo:Pickup(rover)
                     end
@@ -135,7 +135,7 @@ function AutoCargo:DoTasks()
 end
 
 function AutoCargo:Pickup(rover)
-    lcPrint("Pickup")
+    --lcPrint("Pickup")
     if not rover.auto_cargo_task then
         return
     end
@@ -144,13 +144,13 @@ function AutoCargo:Pickup(rover)
 
     if amount <= 0 then
         rover.auto_cargo_task = false
-        lcPrint("Pickup cancelled: zero resources requested")
+        --lcPrint("Pickup cancelled: zero resources requested")
         return
     end
 
     if not rover.auto_cargo_task.source then
         rover.auto_cargo_task = false
-        lcPrint("Pickup cancelled: invalid source")
+        --lcPrint("Pickup cancelled: invalid source")
         return
     end
 
@@ -158,17 +158,17 @@ function AutoCargo:Pickup(rover)
 
     if source:GetStoredAmount(resource) <= 0 then
         rover.auto_cargo_task = false
-        lcPrint("Pickup cancelled: no resources at source")
+        --lcPrint("Pickup cancelled: no resources at source")
         return
     end
 
-    lcPrint("Picking up " .. resource .. " from depot at " .. print_format(source:GetPos()))
+    --lcPrint("Picking up " .. resource .. " from depot at " .. print_format(source:GetPos()))
     SetUnitControlInteractionMode(rover, false)
     rover:SetCommand("TransferResources", source, "load", resource, amount)
 end
 
 function AutoCargo:Deliver(rover)
-    lcPrint("Deliver")
+    --lcPrint("Deliver")
     if not rover.auto_cargo_task then
         return
     end
@@ -177,24 +177,24 @@ function AutoCargo:Deliver(rover)
     local destination = rover.auto_cargo_task.destination
 
     if rover:GetStoredAmount() > 0 then
-        lcPrint("Delivering " .. amount .. " " .. resource .. " to depot at " .. print_format(destination:GetPos()))
+        --lcPrint("Delivering " .. amount .. " " .. resource .. " to depot at " .. print_format(destination:GetPos()))
         SetUnitControlInteractionMode(rover, false)
         rover:SetCommand("TransferAllResources", destination, "unload", rover.storable_resources)
     else
-        lcPrint("Cargo delivered")
+        --lcPrint("Cargo delivered")
         rover.auto_cargo_task = false
     end
 end
 
 function AutoCargo:FindTransportTask()
-    lcPrint("FindTransportTask")
+    --lcPrint("FindTransportTask")
     local MinResourceThreshold = 4 -- TODO make configurable through modconfig
     local supply_queue = {}
     local demand_queue = {}
 
     local function PrintTask(type, task)
         if task then
-            lcPrint(type .. ", " .. task.resource .. ", " .. task.amount)
+            --lcPrint(type .. ", " .. task.resource .. ", " .. task.amount)
         end
     end
 
@@ -267,7 +267,7 @@ function AutoCargo:FindTransportTask()
             end
         end
     }
-    --lcPrint("found " .. numDepots .. " depots")
+    ----lcPrint("found " .. numDepots .. " depots")
 
     -- approach: move resources until all depots have same amount
     -- sort demand tasks ascending
@@ -292,11 +292,11 @@ function AutoCargo:FindTransportTask()
     for _, demand in ipairs(demand_queue) do
         local resource = demand.resource
         local amount = demand.amount
-        lcPrint(resource .. " demand: "..amount)
+        --lcPrint(resource .. " demand: "..amount)
         local available = ResourceOverviewObj:GetAvailable(resource) or 0
-        lcPrint("total "..resource.." available: "..available.." in "..depots[resource].." depots")
+        --lcPrint("total "..resource.." available: "..available.." in "..depots[resource].." depots")
         local average = available / depots[resource]
-        lcPrint(resource .. " average: " .. average)
+        --lcPrint(resource .. " average: " .. average)
         for _, supply in ipairs(supply_queue) do
             if (supply.resource == resource) and (supply.amount > average) then
                 local transport_task = {}
