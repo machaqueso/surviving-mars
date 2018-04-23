@@ -162,7 +162,7 @@ function AutoCargo:Pickup(rover)
         return
     end
 
-    --lcPrint("Picking up " .. resource .. " from depot at " .. print_format(source:GetPos()))
+    lcPrint("Picking up " .. resource .. " from depot at " .. print_format(source:GetPos()))
     SetUnitControlInteractionMode(rover, false)
     rover:SetCommand("TransferResources", source, "load", resource, amount)
 end
@@ -177,11 +177,11 @@ function AutoCargo:Deliver(rover)
     local destination = rover.auto_cargo_task.destination
 
     if rover:GetStoredAmount() > 0 then
-        --lcPrint("Delivering " .. amount .. " " .. resource .. " to depot at " .. print_format(destination:GetPos()))
+        lcPrint("Delivering " .. amount .. " " .. resource .. " to depot at " .. print_format(destination:GetPos()))
         SetUnitControlInteractionMode(rover, false)
         rover:SetCommand("TransferAllResources", destination, "unload", rover.storable_resources)
     else
-        --lcPrint("Cargo delivered")
+        lcPrint("Cargo delivered")
         rover.auto_cargo_task = false
     end
 end
@@ -194,7 +194,7 @@ function AutoCargo:FindTransportTask()
 
     local function PrintTask(type, task)
         if task then
-            --lcPrint(type .. ", " .. task.resource .. ", " .. task.amount)
+        --lcPrint(type .. ", " .. task.resource .. ", " .. task.amount)
         end
     end
 
@@ -211,10 +211,12 @@ function AutoCargo:FindTransportTask()
     end
 
     local function QueueDemand(depot, task)
+        --lcPrint("demand depot: " .. depot.encyclopedia_id)
         local resource = task:GetResource()
-        local amount = task:GetTargetAmount()
+        local stored = depot:GetStoredAmount(resource)
+        local amount = task:GetTargetAmount() - stored
         -- for initial simplicity, we only include depots with no resource
-        if task:GetActualAmount() == 0 then
+        if stored == 0 then
             --PrintTask("demand", task)
             local demand_task = {}
             demand_task.depot = depot
@@ -246,23 +248,28 @@ function AutoCargo:FindTransportTask()
     ForEach {
         class = "StorageDepot",
         exec = function(depot)
-            -- count depots with stock for average
-            for k, v in pairs(depot.stockpiled_amount) do
-                if v > 0 then
-                    depots[k] = depots[k] + 1
-                end
-            end
-
-            for _, request in ipairs(depot.task_requests or empty_table) do
-                if request:IsAnyFlagSet(const.rfDemand) then
-                    -- RCTransports cannot deliver to rockets
-                    -- TODO: Should probably exclude space elevator as well
-                    if not (depot.encyclopedia_id == "Rocket") then
-                        QueueDemand(depot, request)
+            --lcPrint(depot.encyclopedia_id)
+            if (string.match(depot.encyclopedia_id, "Storage")) then
+                -- count depots with stock for average
+                if (type(depot.stockpiled_amount or {}) == "table") then
+                    for k, v in pairs(depot.stockpiled_amount or {}) do
+                        if v > 0 then
+                            depots[k] = depots[k] + 1
+                        end
                     end
                 end
-                if request:IsAnyFlagSet(const.rfSupply) then
-                    QueueSupply(depot, request)
+
+                for _, request in ipairs(depot.task_requests or empty_table) do
+                    if request:IsAnyFlagSet(const.rfDemand) then
+                        -- RCTransports cannot deliver to rockets
+                        -- TODO: Should probably exclude space elevator as well
+                        if not (depot.encyclopedia_id == "Rocket") then
+                            QueueDemand(depot, request)
+                        end
+                    end
+                    if request:IsAnyFlagSet(const.rfSupply) then
+                        QueueSupply(depot, request)
+                    end
                 end
             end
         end
@@ -278,7 +285,7 @@ function AutoCargo:FindTransportTask()
             return a.amount > b.amount
         end
     )
-    --PrintTask("demand", demand_queue[1])
+    PrintTask("demand", demand_queue[1])
     -- sort supply tasks by descending amount of stored resource
     table.sort(
         supply_queue,
@@ -286,25 +293,35 @@ function AutoCargo:FindTransportTask()
             return a.amount < b.amount
         end
     )
-    --PrintTask("supply", supply_queue[1])
+    PrintTask("supply", supply_queue[1])
 
     -- loop through demand tasks until we find a supply depot with resources to satisface it
     for _, demand in ipairs(demand_queue) do
         local resource = demand.resource
         local amount = demand.amount
-        --lcPrint(resource .. " demand: "..amount)
-        local available = ResourceOverviewObj:GetAvailable(resource) or 0
-        --lcPrint("total "..resource.." available: "..available.." in "..depots[resource].." depots")
-        local average = available / depots[resource]
-        --lcPrint(resource .. " average: " .. average)
-        for _, supply in ipairs(supply_queue) do
-            if (supply.resource == resource) and (supply.amount > average) then
-                local transport_task = {}
-                transport_task.source = supply.depot
-                transport_task.destination = demand.depot
-                transport_task.resource = resource
-                transport_task.amount = average
-                return transport_task
+
+        if amount > MinResourceThreshold then
+            lcPrint(resource .. " demand: " .. amount)
+            if depots[resource] > 0 then
+                local available = ResourceOverviewObj:GetAvailable(resource) or 0
+                lcPrint("Total " .. resource .. " available: " .. available .. " in " .. depots[resource] .. " depots")
+                local average = available / depots[resource]
+                if amount > average then
+                    amount = average
+                end
+
+                lcPrint(resource .. " average: " .. average)
+                for _, supply in ipairs(supply_queue) do
+                    if (supply.resource == resource) and (supply.amount > average) then
+                        local transport_task = {}
+                        transport_task.source = supply.depot
+                        transport_task.destination = demand.depot
+                        transport_task.resource = resource
+                        transport_task.amount = amount
+                        lcPrint("Assigning task")
+                        return transport_task
+                    end
+                end
             end
         end
     end
