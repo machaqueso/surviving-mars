@@ -1,39 +1,33 @@
-GlobalObj("AutoCargoManagerInstance", "AutoCargoManager")
-local MinResourceThreshold = 4 -- TODO make configurable through modconfig
+-- GlobalObj("AutoCargoManagerInstance", "AutoCargoManager")
 -- local storable_resources = {"Concrete", "Metals", "Polymers", "Food", "Electronics", "MachineParts", "PreciousMetals", "Fuel", "MysteryResource", "BlackCube"}
 
-DefineClass.AutoCargoManager = {
-	__parents = {"InitDone"},
-	city = false,
-	transport_queues = false,
-	supply_queue = false,
-	demand_queue = false
-}
+-- AutoCargoManager = {
+-- 	transport_queues = false,
+-- 	supply_queue = false,
+-- 	demand_queue = false
+-- }
 
-function AutoCargoManager:Init()
-	self.transport_queues = {}
-	self.supply_queue = {}
-	self.demand_queue = {}
-end
-
-local function AddSupplyDepot(task)
-	local resource = task:GetResource()
-	if task:GetActualAmount() > MinResourceThreshold then
-		table.insert(supply_queue, task)
-	end
-end
-
-local function AddDemandDepot(task)
-	-- for initial simplicity, we only include depots with no resource
-	if task:GetActualAmount() == 0 then
-		table.insert(demand_queue, task)
-	end
-end
 
 function AutoCargoManager:FindTransportTask()
-	self.supply_queue = {}
-	self.demand_queue = {}
-
+	lcPrint("FindTransportTask")
+	local MinResourceThreshold = 4 -- TODO make configurable through modconfig
+	local supply_queue = {}
+	local demand_queue = {}
+	
+	local function AddSupplyDepot(task)
+		local resource = task:GetResource()
+		if task:GetActualAmount() > MinResourceThreshold then
+			table.insert(supply_queue, task)
+		end
+	end
+	
+	local function AddDemandDepot(task)
+		-- for initial simplicity, we only include depots with no resource
+		if task:GetActualAmount() == 0 then
+			table.insert(demand_queue, task)
+		end
+	end
+	
 	local numDepots = 0
 	-- Get all supply and demand tasks
 	ForEach {
@@ -45,40 +39,41 @@ function AutoCargoManager:FindTransportTask()
 					-- RCTransports cannot deliver to rockets
 					-- TODO: Should probably exclude space elevator as well
 					if not (depot.encyclopedia_id == "Rocket") then
-						AddDemandDepot(depot)
+						AddDemandDepot(request)
 					end
 				end
 				if request:IsAnyFlagSet(const.rfSupply) then
-					AddSupplyDepot(depot)
+					AddSupplyDepot(request)
 				end
 			end
 		end
 	}
+	lcPrint("found "..numDepots.." depots")
 
 	-- approach: move resources until all depots have same amount
 	-- sort demand tasks ascending
 	-- TODO: this sort will be by priority scoring in the future
 	table.sort(
-		self.demand_queue,
+		demand_queue,
 		function(a, b)
 			return a:GetActualAmount() > b:GetActualAmount()
 		end
 	)
 	-- sort supply tasks by descending amount of stored resource
 	table.sort(
-		self.supply_queue,
+		supply_queue,
 		function(a, b)
 			return a:GetActualAmount() < b:GetActualAmount()
 		end
 	)
 
 	-- loop through demand tasks until we find a supply depot with resources to satisface it
-	for _, demand in ipairs(self.demand_queue) do
+	for _, demand in ipairs(demand_queue) do
 		local resource = demand.resource
 		local amount = demand.GetTargetAmount()
-
-		local average = ResourceOverviewObj:GetAvailable(resource) / numDepots
-		for _, supply in ipairs(self.supply_queue) do
+		lcPrint(resource)
+		local average = ResourceOverviewObj:GetAvailable(resource) or 0 / numDepots
+		for _, supply in ipairs(supply_queue) do
 			if (supply:GetResource() == resource) and (supply:GetActualAmount() > average) then
 				local transport_task = {}
 				transport_task.source = supply.depot

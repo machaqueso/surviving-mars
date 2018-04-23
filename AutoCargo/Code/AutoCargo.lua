@@ -6,6 +6,7 @@ AutoCargo.StringIdBase = 20180406
 
 function OnMsg.ClassesBuilt()
     AutoCargoAddInfoSection()
+    --AutoCargoManager:Init()
 end
 
 function AutoCargoAddInfoSection()
@@ -114,10 +115,13 @@ function AutoCargo:DoTasks()
     ForEach {
         class = "RCTransport",
         exec = function(rover)
+            lcPrint(rover.command)
             if rover.auto_cargo and rover.command == "Idle" then
                 if not rover.auto_cargo_task then
-                    local task = AutoCargoManagerInstance:FindTransportTask(rover)
+                    lcPrint("getting task")
+                    local task = AutoCargo:FindTransportTask(rover)
                     if (task) then
+                        lcPrint("got task")
                         rover.auto_cargo_task = task
                         AutoCargo:Pickup(rover)
                     end
@@ -179,5 +183,129 @@ function AutoCargo:Deliver(rover)
     else
         lcPrint("Cargo delivered")
         rover.auto_cargo_task = false
+    end
+end
+
+function AutoCargo:FindTransportTask()
+    lcPrint("FindTransportTask")
+    local MinResourceThreshold = 4 -- TODO make configurable through modconfig
+    local supply_queue = {}
+    local demand_queue = {}
+
+    local function PrintTask(type, task)
+        if task then
+            lcPrint(type .. ", " .. task.resource .. ", " .. task.amount)
+        end
+    end
+
+    local function QueueSupply(depot, task)
+        local resource = task:GetResource()
+        local amount = task:GetActualAmount()
+        if amount > MinResourceThreshold then
+            local supply_task = {}
+            supply_task.depot = depot
+            supply_task.resource = resource
+            supply_task.amount = amount
+            table.insert(supply_queue, supply_task)
+        end
+    end
+
+    local function QueueDemand(depot, task)
+        local resource = task:GetResource()
+        local amount = task:GetTargetAmount()
+        -- for initial simplicity, we only include depots with no resource
+        if task:GetActualAmount() == 0 then
+            --PrintTask("demand", task)
+            local demand_task = {}
+            demand_task.depot = depot
+            demand_task.resource = resource
+            demand_task.amount = amount
+            table.insert(demand_queue, demand_task)
+        end
+    end
+
+    local storable_resources = {
+        "Concrete",
+        "Metals",
+        "Polymers",
+        "Food",
+        "Electronics",
+        "MachineParts",
+        "PreciousMetals",
+        "Fuel",
+        "MysteryResource",
+        "BlackCube"
+    }
+    local depots = {}
+
+    for _, resource in ipairs(storable_resources) do
+        depots[resource] = 0
+    end
+
+    -- Get all supply and demand tasks
+    ForEach {
+        class = "StorageDepot",
+        exec = function(depot)
+            -- count depots with stock for average
+            for k, v in pairs(depot.stockpiled_amount) do
+                if v > 0 then
+                    depots[k] = depots[k] + 1
+                end
+            end
+
+            for _, request in ipairs(depot.task_requests or empty_table) do
+                if request:IsAnyFlagSet(const.rfDemand) then
+                    -- RCTransports cannot deliver to rockets
+                    -- TODO: Should probably exclude space elevator as well
+                    if not (depot.encyclopedia_id == "Rocket") then
+                        QueueDemand(depot, request)
+                    end
+                end
+                if request:IsAnyFlagSet(const.rfSupply) then
+                    QueueSupply(depot, request)
+                end
+            end
+        end
+    }
+    --lcPrint("found " .. numDepots .. " depots")
+
+    -- approach: move resources until all depots have same amount
+    -- sort demand tasks ascending
+    -- TODO: this sort will be by priority scoring in the future
+    table.sort(
+        demand_queue,
+        function(a, b)
+            return a.amount > b.amount
+        end
+    )
+    --PrintTask("demand", demand_queue[1])
+    -- sort supply tasks by descending amount of stored resource
+    table.sort(
+        supply_queue,
+        function(a, b)
+            return a.amount < b.amount
+        end
+    )
+    --PrintTask("supply", supply_queue[1])
+
+    -- loop through demand tasks until we find a supply depot with resources to satisface it
+    for _, demand in ipairs(demand_queue) do
+        local resource = demand.resource
+        local amount = demand.amount
+        lcPrint(resource .. " demand: "..amount)
+        local available = ResourceOverviewObj:GetAvailable(resource) or 0
+        lcPrint("total "..resource.." available: "..available.." in "..depots[resource].." depots")
+        local average = available / depots[resource]
+        lcPrint(resource .. " average: " .. average)
+        for _, supply in ipairs(supply_queue) do
+            if (supply.resource == resource) and (supply.amount > average) then
+                local transport_task = {}
+                transport_task.source = supply.depot
+                transport_task.destination = demand.depot
+                transport_task.resource = resource
+                transport_task.amount = average
+                return transport_task
+            end
+        end
     end
 end
