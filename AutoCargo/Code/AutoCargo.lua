@@ -173,10 +173,10 @@ function AutoCargo:DoTasks()
     ForEach {
         class = "RCTransport",
         exec = function(rover)
-            ----lcPrint(rover.command)
+            --lcPrint(rover.command)
             if rover.auto_cargo and rover.command == "Idle" then
                 if not rover.auto_cargo_task then
-                    ----lcPrint("getting task")
+                    --lcPrint("getting task")
                     local task = AutoCargo:FindTransportTask(rover)
                     if (task) then
                         --lcPrint("got task")
@@ -204,13 +204,13 @@ function AutoCargo:Pickup(rover)
 
     if amount <= 0 then
         rover.auto_cargo_task = false
-        ----lcPrint("Pickup cancelled: zero resources requested")
+        --lcPrint("Pickup cancelled: zero resources requested")
         return
     end
 
     if not rover.auto_cargo_task.source then
         rover.auto_cargo_task = false
-        ----lcPrint("Pickup cancelled: invalid source")
+        --lcPrint("Pickup cancelled: invalid source")
         return
     end
 
@@ -218,7 +218,7 @@ function AutoCargo:Pickup(rover)
 
     if source:GetStoredAmount(resource) <= 0 then
         rover.auto_cargo_task = false
-        ----lcPrint("Pickup cancelled: no resources at source")
+        --lcPrint("Pickup cancelled: no resources at source")
         return
     end
 
@@ -242,7 +242,7 @@ end
 function AutoCargo:Deliver(rover)
     local showNotifications = AutoCargo:ConfigShowNotification()
 
-    ----lcPrint("Deliver")
+    --lcPrint("Deliver")
     if not rover.auto_cargo_task then
         return
     end
@@ -281,18 +281,18 @@ function AutoCargo:FindTransportTask()
 end
 
 function AutoCargo:RebuildQueue()
-    lcPrint("Rebuilding queue")
+    --lcPrint("Rebuilding queue")
 
     AutoCargo.transport_tasks = {}
 
-    ----lcPrint("FindTransportTask")
+    --lcPrint("FindTransportTask")
     local MinResourceThreshold = 4 -- TODO make configurable through modconfig
     local supply_queue = {}
     local demand_queue = {}
 
     local function PrintTask(type, task)
         if task then
-        ----lcPrint(type .. ", " .. task.resource .. ", " .. task.amount)
+        --lcPrint(type .. ", " .. task.resource .. ", " .. task.amount)
         end
     end
 
@@ -309,7 +309,7 @@ function AutoCargo:RebuildQueue()
     end
 
     local function QueueDemand(depot, task)
-        ----lcPrint("demand depot: " .. depot.encyclopedia_id)
+        --lcPrint("demand depot: " .. depot.encyclopedia_id)
         local resource = task:GetResource()
         local stored = depot:GetStoredAmount(resource)
         local amount = task:GetTargetAmount() - stored
@@ -348,7 +348,7 @@ function AutoCargo:RebuildQueue()
     ForEach {
         class = "StorageDepot",
         exec = function(depot)
-            ----lcPrint(depot.encyclopedia_id)
+            --lcPrint(depot.encyclopedia_id)
             if (string.match(depot.encyclopedia_id, "Storage")) then
                 -- count depots with stock for average
                 if (type(depot.stockpiled_amount or {}) == "table") then
@@ -377,7 +377,7 @@ function AutoCargo:RebuildQueue()
     }
 
     -- for _, resource in ipairs(storable_resources) do
-    --     lcPrint(resource.." depots: "..depots[resource])
+    --     --lcPrint(resource.." depots: "..depots[resource])
     --     depots[resource] = 0
     -- end
 
@@ -431,7 +431,7 @@ function AutoCargo:RebuildQueue()
                                 transport_task.amount = amount
                             end
 
-                            lcPrint("Queued task: " .. amount .. " " .. resource)
+                            --lcPrint("Queued task: " .. amount .. " " .. resource)
                             table.insert(AutoCargo.transport_tasks, transport_task)
                             --return transport_task
                             count = count + 1
@@ -441,7 +441,7 @@ function AutoCargo:RebuildQueue()
             end
         end
     end
-    lcPrint(count .. " tasks queued")
+    --lcPrint(count .. " tasks queued")
 
     -- order by largest amount descending
     table.sort(
