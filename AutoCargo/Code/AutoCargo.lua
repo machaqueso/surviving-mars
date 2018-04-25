@@ -265,7 +265,27 @@ function AutoCargo:Deliver(rover)
         end
 
         SetUnitControlInteractionMode(rover, false)
-        rover:SetCommand("TransferAllResources", destination, "unload", rover.storable_resources)
+
+        -- Hack to ensure unloading cargo (rover just stops if depot full)
+        -- Couldn't figure out a way to find if depot is full
+        if not rover.auto_cargo_task.shouldDump then
+            rover:SetCommand("TransferAllResources", destination, "unload", rover.storable_resources)
+            rover.auto_cargo_task.shouldDump = true
+        else
+            if showNotifications == "problem" then
+                AddCustomOnScreenNotification(
+                    "AutoCargoDeliverFull",
+                    T {rover.name},
+                    T {AutoCargo.StringIdBase + 28, "Depot full of " .. resource},
+                    "UI/Icons/Upgrades/service_bots_02.tga",
+                    false,
+                    {
+                        expiration = 15000
+                    }
+                )
+            end
+            rover:SetCommand("DumpCargo", destination:GetPos(), "all")
+        end
     else
         --lcPrint("Cargo delivered")
         rover.auto_cargo_task = false
@@ -273,19 +293,20 @@ function AutoCargo:Deliver(rover)
 end
 
 function AutoCargo:FindTransportTask()
-    if AutoCargo.transport_tasks then
-        local task = AutoCargo.transport_tasks[1]
-        table.remove(AutoCargo.transport_tasks, 1)
-        return task
+    -- return the first non-assigned task
+    for _, task in ipairs(AutoCargo.transport_tasks) do
+        if not task.isAssigned then
+            task.isAssigned = true
+            return task
+        end
     end
 end
 
 function AutoCargo:RebuildQueue()
-    --lcPrint("Rebuilding queue")
+    --lcPrint("Refresh queue")
 
-    AutoCargo.transport_tasks = {}
+    -- AutoCargo.transport_tasks = {}
 
-    --lcPrint("FindTransportTask")
     local MinResourceThreshold = 4 -- TODO make configurable through modconfig
     local supply_queue = {}
     local demand_queue = {}
@@ -293,6 +314,12 @@ function AutoCargo:RebuildQueue()
     local function PrintTask(type, task)
         if task then
         --lcPrint(type .. ", " .. task.resource .. ", " .. task.amount)
+        end
+    end
+
+    local function printQueue(queue)
+        for _, task in ipairs(queue) do
+            --lcPrint(task.resource .. ", " .. task.amount)
         end
     end
 
@@ -324,6 +351,17 @@ function AutoCargo:RebuildQueue()
         end
     end
 
+    local function QueueTask(transport_task)
+        -- crappy way to avoid adding duplicate tasks
+        for _, task in ipairs(AutoCargo.transport_tasks) do
+            if (transport_task.destination == task.destination ) and (transport_task.resource == task.resource) then
+                return false
+            end
+        end
+        table.insert(AutoCargo.transport_tasks, transport_task)
+        return true
+    end
+
     local storable_resources = {
         "Concrete",
         "Metals",
@@ -338,6 +376,8 @@ function AutoCargo:RebuildQueue()
     }
     local depots = {}
     local depotsWithStock = {}
+    local available = {}
+    local averages = {}
 
     for _, resource in ipairs(storable_resources) do
         depots[resource] = 0
@@ -376,20 +416,31 @@ function AutoCargo:RebuildQueue()
         end
     }
 
-    -- for _, resource in ipairs(storable_resources) do
-    --     --lcPrint(resource.." depots: "..depots[resource])
-    --     depots[resource] = 0
-    -- end
+    for _, resource in ipairs(storable_resources) do
+        if depots[resource] > 0 then
+            available[resource] = ResourceOverviewObj:GetAvailable(resource) or 0
+            averages[resource] = available[resource] / depots[resource]
+        -- --lcPrint(
+        --     resource ..
+        --         " depots: " ..
+        --             depots[resource] ..
+        --                 ", available: " .. available[resource] .. ", average: " .. averages[resource]
+        -- )
+        end
+    end
 
-    -- approach: move resources until all depots have same amount
+    -- approach: spread average amount of resources across all depots
     -- sort demand tasks ascending
     -- TODO: this sort will be by priority scoring in the future
+    --lcPrint("Sorting demand queue")
     table.sort(
         demand_queue,
         function(a, b)
             return a.amount < b.amount
         end
     )
+    printQueue(demand_queue)
+
     PrintTask("demand", demand_queue[1])
     -- sort supply tasks by descending amount of stored resource
     table.sort(
@@ -406,48 +457,31 @@ function AutoCargo:RebuildQueue()
         local resource = demand.resource
         local amount = demand.amount
 
-        if amount > MinResourceThreshold then
-            --lcPrint(resource .. " demand: " .. amount)
-            if depotsWithStock[resource] > 0 then
-                local available = ResourceOverviewObj:GetAvailable(resource) or 0
+        if (amount > MinResourceThreshold) and (depotsWithStock[resource] > 0) and (available[resource] > 0) then
+            if amount > averages[resource] then
+                amount = averages[resource]
+            end
 
-                if available > 0 then
-                    --lcPrint("Total " .. resource .. " available: " .. available .. " in " .. depots[resource] .. " depots")
-                    local average = available / depots[resource]
-                    if amount > average then
-                        amount = average
+            -- loop through supply tasks to find a match
+            for _, supply in ipairs(supply_queue) do
+                if (supply.resource == resource) and (supply.amount > averages[resource]) then
+                    local transport_task = {}
+                    transport_task.source = supply.depot
+                    transport_task.destination = demand.depot
+                    transport_task.resource = resource
+                    transport_task.isAssigned = false
+                    -- take at most half the stock
+                    transport_task.amount = supply.amount / 2
+                    if transport_task.amount > amount then
+                        transport_task.amount = amount
                     end
 
-                    --lcPrint(resource .. " average: " .. average)
-                    for _, supply in ipairs(supply_queue) do
-                        if (supply.resource == resource) and (supply.amount > average) then
-                            local transport_task = {}
-                            transport_task.source = supply.depot
-                            transport_task.destination = demand.depot
-                            transport_task.resource = resource
-                            -- take at most half the stock
-                            transport_task.amount = supply.amount / 2
-                            if transport_task.amount > amount then
-                                transport_task.amount = amount
-                            end
-
-                            --lcPrint("Queued task: " .. amount .. " " .. resource)
-                            table.insert(AutoCargo.transport_tasks, transport_task)
-                            --return transport_task
-                            count = count + 1
-                        end
+                    if QueueTask(transport_task) then
+                        count = count + 1
                     end
                 end
             end
         end
     end
     --lcPrint(count .. " tasks queued")
-
-    -- order by largest amount descending
-    table.sort(
-        AutoCargo.transport_tasks,
-        function(a, b)
-            return a.amount > b.amount
-        end
-    )
 end
