@@ -1,9 +1,42 @@
+-- Inspired by akarnokd's excelent AutoCargo: mod (https://github.com/akarnokd/surviving-mars-mods)
+-- Parts of this code are based on that mod, specially the game thread, menu and modconfig sections
+
+-- Globals
 AutoCargo = {}
 -- Base ID for translatable text
 AutoCargo.StringIdBase = 20180406
+-- global queue of transport tasks
+AutoCargo.transport_tasks = {}
+
+function OnMsg.GameTimeStart()
+    AutoCargoInstallThread()
+end
+
+function OnMsg.LoadGame()
+    AutoCargoInstallThread()
+end
+
+function AutoCargoInstallThread()
+    CreateGameTimeThread(
+        function()
+            AutoCargo:RebuildQueue()
+            while true do
+                --lcPrint("Ping")
+                AutoCargo:DoTasks()
+                local period = AutoCargo:ConfigUpdatePeriod()
+                Sleep(tonumber(period))
+            end
+        end
+    )
+end
+
+function OnMsg.NewHour()
+    --lcPrint("NewHour")
+    AutoCargo:RebuildQueue()
+    AutoCargo:DoTasks()
+end
 
 -- Setup UI
-
 function OnMsg.ClassesBuilt()
     AutoCargoAddInfoSection()
     --AutoCargoManager:Init()
@@ -72,11 +105,18 @@ end
 -- Setup ModConfig UI
 
 -- See if ModConfig is installed and that notifications are enabled
-function AutoCargoConfigShowNotification()
+function AutoCargo:ConfigShowNotification()
     if rawget(_G, "ModConfig") then
         return ModConfig:Get("AutoCargo", "Notifications")
     end
     return "all"
+end
+
+function AutoCargo:ConfigUpdatePeriod()
+    if rawget(_G, "ModConfig") then
+        return ModConfig:Get("AutoCargo", "UpdatePeriod")
+    end
+    return "5000"
 end
 
 -- ModConfig signals "ModConfigReady" when it can be manipulated
@@ -105,10 +145,28 @@ function OnMsg.ModConfigReady()
             default = "all"
         }
     )
-end
 
-function OnMsg.NewHour()
-    AutoCargo:DoTasks()
+    ModConfig:RegisterOption(
+        "AutoCargo",
+        "UpdatePeriod",
+        {
+            name = T {AutoCargo.StringIdBase + 24, "Update period"},
+            desc = T {
+                AutoCargo.StringIdBase + 25,
+                "Time transport stays idle before picking a task.<newline>Pick a larger value if your colony has become large and you get lag."
+            },
+            type = "enum",
+            values = {
+                {value = "1000", label = T {"1 s"}},
+                {value = "2000", label = T {"2 s"}},
+                {value = "3000", label = T {"3 s"}},
+                {value = "4000", label = T {"4 s"}},
+                {value = "5000", label = T {"5 s"}},
+                {value = "10000", label = T {"10 s"}}
+            },
+            default = "5000"
+        }
+    )
 end
 
 function AutoCargo:DoTasks()
@@ -121,7 +179,7 @@ function AutoCargo:DoTasks()
                     ----lcPrint("getting task")
                     local task = AutoCargo:FindTransportTask(rover)
                     if (task) then
-                        ----lcPrint("got task")
+                        --lcPrint("got task")
                         rover.auto_cargo_task = task
                         AutoCargo:Pickup(rover)
                     end
@@ -135,10 +193,12 @@ function AutoCargo:DoTasks()
 end
 
 function AutoCargo:Pickup(rover)
-    ----lcPrint("Pickup")
+    local showNotifications = AutoCargo:ConfigShowNotification()
+
     if not rover.auto_cargo_task then
         return
     end
+
     local resource = rover.auto_cargo_task.resource
     local amount = rover.auto_cargo_task.amount
 
@@ -162,12 +222,26 @@ function AutoCargo:Pickup(rover)
         return
     end
 
-    --lcPrint("Picking up " .. resource .. " from depot at " .. print_format(source:GetPos()))
+    if showNotifications == "all" then
+        AddCustomOnScreenNotification(
+            "AutoCargoPickup",
+            T {rover.name},
+            T {AutoCargo.StringIdBase + 26, "AutoCargo picking up " .. resource},
+            "UI/Icons/Upgrades/service_bots_02.tga",
+            false,
+            {
+                expiration = 15000
+            }
+        )
+    end
+
     SetUnitControlInteractionMode(rover, false)
     rover:SetCommand("TransferResources", source, "load", resource, amount)
 end
 
 function AutoCargo:Deliver(rover)
+    local showNotifications = AutoCargo:ConfigShowNotification()
+
     ----lcPrint("Deliver")
     if not rover.auto_cargo_task then
         return
@@ -177,7 +251,19 @@ function AutoCargo:Deliver(rover)
     local destination = rover.auto_cargo_task.destination
 
     if rover:GetStoredAmount() > 0 then
-        --lcPrint("Delivering " .. amount .. " " .. resource .. " to depot at " .. print_format(destination:GetPos()))
+        if showNotifications == "all" then
+            AddCustomOnScreenNotification(
+                "AutoCargoDeliver",
+                T {rover.name},
+                T {AutoCargo.StringIdBase + 27, "AutoCargo delivering " .. resource},
+                "UI/Icons/Upgrades/service_bots_02.tga",
+                false,
+                {
+                    expiration = 15000
+                }
+            )
+        end
+
         SetUnitControlInteractionMode(rover, false)
         rover:SetCommand("TransferAllResources", destination, "unload", rover.storable_resources)
     else
@@ -187,6 +273,18 @@ function AutoCargo:Deliver(rover)
 end
 
 function AutoCargo:FindTransportTask()
+    if AutoCargo.transport_tasks then
+        local task = AutoCargo.transport_tasks[1]
+        table.remove(AutoCargo.transport_tasks, 1)
+        return task
+    end
+end
+
+function AutoCargo:RebuildQueue()
+    lcPrint("Rebuilding queue")
+
+    AutoCargo.transport_tasks = {}
+
     ----lcPrint("FindTransportTask")
     local MinResourceThreshold = 4 -- TODO make configurable through modconfig
     local supply_queue = {}
@@ -239,9 +337,11 @@ function AutoCargo:FindTransportTask()
         "BlackCube"
     }
     local depots = {}
+    local depotsWithStock = {}
 
     for _, resource in ipairs(storable_resources) do
         depots[resource] = 0
+        depotsWithStock[resource] = 0
     end
 
     -- Get all supply and demand tasks
@@ -253,8 +353,9 @@ function AutoCargo:FindTransportTask()
                 -- count depots with stock for average
                 if (type(depot.stockpiled_amount or {}) == "table") then
                     for k, v in pairs(depot.stockpiled_amount or {}) do
+                        depots[k] = depots[k] + 1
                         if v > 0 then
-                            depots[k] = depots[k] + 1
+                            depotsWithStock[k] = depotsWithStock[k] + 1
                         end
                     end
                 end
@@ -274,7 +375,11 @@ function AutoCargo:FindTransportTask()
             end
         end
     }
-    ------lcPrint("found " .. numDepots .. " depots")
+
+    -- for _, resource in ipairs(storable_resources) do
+    --     lcPrint(resource.." depots: "..depots[resource])
+    --     depots[resource] = 0
+    -- end
 
     -- approach: move resources until all depots have same amount
     -- sort demand tasks ascending
@@ -282,7 +387,7 @@ function AutoCargo:FindTransportTask()
     table.sort(
         demand_queue,
         function(a, b)
-            return a.amount > b.amount
+            return a.amount < b.amount
         end
     )
     PrintTask("demand", demand_queue[1])
@@ -290,11 +395,12 @@ function AutoCargo:FindTransportTask()
     table.sort(
         supply_queue,
         function(a, b)
-            return a.amount < b.amount
+            return a.amount > b.amount
         end
     )
     PrintTask("supply", supply_queue[1])
 
+    local count = 0
     -- loop through demand tasks until we find a supply depot with resources to satisface it
     for _, demand in ipairs(demand_queue) do
         local resource = demand.resource
@@ -302,27 +408,46 @@ function AutoCargo:FindTransportTask()
 
         if amount > MinResourceThreshold then
             --lcPrint(resource .. " demand: " .. amount)
-            if depots[resource] > 0 then
+            if depotsWithStock[resource] > 0 then
                 local available = ResourceOverviewObj:GetAvailable(resource) or 0
-                --lcPrint("Total " .. resource .. " available: " .. available .. " in " .. depots[resource] .. " depots")
-                local average = available / depots[resource]
-                if amount > average then
-                    amount = average
-                end
 
-                --lcPrint(resource .. " average: " .. average)
-                for _, supply in ipairs(supply_queue) do
-                    if (supply.resource == resource) and (supply.amount > average) then
-                        local transport_task = {}
-                        transport_task.source = supply.depot
-                        transport_task.destination = demand.depot
-                        transport_task.resource = resource
-                        transport_task.amount = amount
-                        --lcPrint("Assigning+ task")
-                        return transport_task
+                if available > 0 then
+                    --lcPrint("Total " .. resource .. " available: " .. available .. " in " .. depots[resource] .. " depots")
+                    local average = available / depots[resource]
+                    if amount > average then
+                        amount = average
+                    end
+
+                    --lcPrint(resource .. " average: " .. average)
+                    for _, supply in ipairs(supply_queue) do
+                        if (supply.resource == resource) and (supply.amount > average) then
+                            local transport_task = {}
+                            transport_task.source = supply.depot
+                            transport_task.destination = demand.depot
+                            transport_task.resource = resource
+                            -- take at most half the stock
+                            transport_task.amount = supply.amount / 2
+                            if transport_task.amount > amount then
+                                transport_task.amount = amount
+                            end
+
+                            lcPrint("Queued task: " .. amount .. " " .. resource)
+                            table.insert(AutoCargo.transport_tasks, transport_task)
+                            --return transport_task
+                            count = count + 1
+                        end
                     end
                 end
             end
         end
     end
+    lcPrint(count .. " tasks queued")
+
+    -- order by largest amount descending
+    table.sort(
+        AutoCargo.transport_tasks,
+        function(a, b)
+            return a.amount > b.amount
+        end
+    )
 end
