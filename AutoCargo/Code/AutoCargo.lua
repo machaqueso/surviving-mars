@@ -170,6 +170,10 @@ function OnMsg.ModConfigReady()
 end
 
 function AutoCargo:DoTasks()
+    if not mapdata.GameLogic then
+        return
+    end
+
     ForEach {
         class = "RCTransport",
         exec = function(rover)
@@ -190,6 +194,16 @@ function AutoCargo:DoTasks()
             end
         end
     }
+end
+
+function AutoCargo:FindTransportTask()
+    -- return the first non-assigned task
+    for _, task in ipairs(AutoCargo.transport_tasks) do
+        if not task.isAssigned then
+            task.isAssigned = true
+            return task
+        end
+    end
 end
 
 function AutoCargo:Pickup(rover)
@@ -292,16 +306,6 @@ function AutoCargo:Deliver(rover)
     end
 end
 
-function AutoCargo:FindTransportTask()
-    -- return the first non-assigned task
-    for _, task in ipairs(AutoCargo.transport_tasks) do
-        if not task.isAssigned then
-            task.isAssigned = true
-            return task
-        end
-    end
-end
-
 function AutoCargo:RebuildQueue()
     --lcPrint("Refresh queue")
 
@@ -362,24 +366,13 @@ function AutoCargo:RebuildQueue()
         return true
     end
 
-    local storable_resources = {
-        "Concrete",
-        "Metals",
-        "Polymers",
-        "Food",
-        "Electronics",
-        "MachineParts",
-        "PreciousMetals",
-        "Fuel",
-        "MysteryResource",
-        "BlackCube"
-    }
     local depots = {}
     local depotsWithStock = {}
     local available = {}
     local averages = {}
 
-    for _, resource in ipairs(storable_resources) do
+    for _, resource in ipairs(StorableResources) do
+        lcPrint(resource)
         depots[resource] = 0
         depotsWithStock[resource] = 0
     end
