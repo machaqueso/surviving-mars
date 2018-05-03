@@ -142,7 +142,7 @@ function OnMsg.ModConfigReady()
                 {value = "problems", label = T {AutoCargo.StringIdBase + 22, "Problems only"}},
                 {value = "off", label = T {AutoCargo.StringIdBase + 23, "Off"}}
             },
-            default = "all"
+            default = "problems"
         }
     )
 
