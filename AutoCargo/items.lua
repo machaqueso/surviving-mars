@@ -1,11 +1,6 @@
 return {
-	PlaceObj(
-		"ModItemCode",
-		{
-			"name",
-			"AutoCargo",
-			"FileName",
-			"Code/AutoCargo.lua"
-		}
-	)
+PlaceObj('ModItemCode', {
+	'name', "AutoCargo",
+	'FileName', "Code/AutoCargo.lua",
+}),
 }
