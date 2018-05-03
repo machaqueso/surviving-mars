@@ -213,13 +213,13 @@ function AutoCargo:FindTransportTask(rover)
         local demand_request = transport_task[3]
         local resource = transport_task[4]
         local amount = Min(supply_request:GetTargetAmount(), demand_request:GetTargetAmount())
-        --lcPrint(amount.." "..resource)
 
         local hauler_task = {}
         hauler_task.source = supply_request:GetBuilding()
         hauler_task.destination = demand_request:GetBuilding()
         hauler_task.resource = resource
         hauler_task.amount = amount
+        lcPrint(amount.." "..resource.." from "..hauler_task.source.handle.." to "..hauler_task.destination.handle)
 
         return hauler_task
     end
