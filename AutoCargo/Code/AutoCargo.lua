@@ -19,7 +19,7 @@ end
 function AutoCargoInstallThread()
     CreateGameTimeThread(
         function()
-            AutoCargo:RebuildQueue()
+            --AutoCargo:RebuildQueue()
             while true do
                 --lcPrint("Ping")
                 AutoCargo:DoTasks()
@@ -32,7 +32,7 @@ end
 
 function OnMsg.NewHour()
     --lcPrint("NewHour")
-    AutoCargo:RebuildQueue()
+    --AutoCargo:RebuildQueue()
     AutoCargo:DoTasks()
 end
 
@@ -178,6 +178,7 @@ function AutoCargo:DoTasks()
         class = "RCTransport",
         exec = function(rover)
             --lcPrint(rover.command)
+
             if rover.auto_cargo and rover.command == "Idle" then
                 if not rover.auto_cargo_task then
                     --lcPrint("getting task")
@@ -196,13 +197,31 @@ function AutoCargo:DoTasks()
     }
 end
 
-function AutoCargo:FindTransportTask()
+function AutoCargo:FindTransportTask(rover)
+    --lcPrint(LRManagerInstance:EstimateTaskCount())
     -- return the first non-assigned task
-    for _, task in ipairs(AutoCargo.transport_tasks) do
-        if not task.isAssigned then
-            task.isAssigned = true
-            return task
-        end
+    -- for _, task in ipairs(AutoCargo.transport_tasks) do
+    --     if not task.isAssigned then
+    --         task.isAssigned = true
+    --         return task
+    --     end
+    -- end
+    local transport_task = LRManagerInstance:FindHaulerTask(rover)
+    --lcPrint("Got transport_task")
+    if transport_task then
+        local supply_request = transport_task[2]
+        local demand_request = transport_task[3]
+        local resource = transport_task[4]
+        local amount = Min(supply_request:GetTargetAmount(), demand_request:GetTargetAmount())
+        --lcPrint(amount.." "..resource)
+
+        local hauler_task = {}
+        hauler_task.source = supply_request:GetBuilding()
+        hauler_task.destination = demand_request:GetBuilding()
+        hauler_task.resource = resource
+        hauler_task.amount = amount
+
+        return hauler_task
     end
 end
 
@@ -358,7 +377,7 @@ function AutoCargo:RebuildQueue()
     local function QueueTask(transport_task)
         -- crappy way to avoid adding duplicate tasks
         for _, task in ipairs(AutoCargo.transport_tasks) do
-            if (transport_task.destination == task.destination ) and (transport_task.resource == task.resource) then
+            if (transport_task.destination == task.destination) and (transport_task.resource == task.resource) then
                 return false
             end
         end
@@ -372,7 +391,7 @@ function AutoCargo:RebuildQueue()
     local averages = {}
 
     for _, resource in ipairs(StorableResources) do
-        lcPrint(resource)
+        --lcPrint(resource)
         depots[resource] = 0
         depotsWithStock[resource] = 0
     end
@@ -409,7 +428,7 @@ function AutoCargo:RebuildQueue()
         end
     }
 
-    for _, resource in ipairs(storable_resources) do
+    for _, resource in ipairs(StorableResources) do
         if depots[resource] > 0 then
             available[resource] = ResourceOverviewObj:GetAvailable(resource) or 0
             averages[resource] = available[resource] / depots[resource]
@@ -477,4 +496,93 @@ function AutoCargo:RebuildQueue()
         end
     end
     --lcPrint(count .. " tasks queued")
+end
+
+--[[
+    CODE BELOW COPIED FROM LRTransport.Lua
+    Stripped down version of LRManagerInstance:FindTransportTask()
+]]
+local minimum_resource_amount_treshold = const.TransportMinResAmountTreshold
+local dist_threshold = const.TransportDistThreshold
+
+local function t_to_prio(t)
+    local as_dist = t / 10 --1s ~ 1guim
+    return as_dist
+end
+
+local function d_to_prio(d)
+    return d * -1
+end
+
+local function CalcDemandPrio(req, bld, requestor)
+    local d = bld:GetDist2D(requestor)
+    --time since serviced, dist (closer is better), if any resource set to import + 100000 + needed amount
+    return t_to_prio(now() - req:GetLastServiced()) + req:GetTargetAmount() + d_to_prio(d)
+end
+
+local function CalcSupplyPrio(s_req, s_bld, d_req, d_bld, requestor, demand_score)
+    local d = s_bld:GetDist2D(d_bld)
+    local d2 = s_bld:GetDist2D(requestor)
+    return s_req:GetTargetAmount() + d_to_prio(d) + d_to_prio(d2) + demand_score
+end
+
+local function CheckMinDist(bld1, bld2)
+    if bld1:IsCloser2D(bld2, dist_threshold) then
+        local did_reach, len = pf.PathLen(bld1:GetPos(), 0, bld2:GetPos()) --cant cache :(
+        return not did_reach or len > dist_threshold
+    end
+    return true
+end
+
+function LRManagerInstance:FindHaulerTask(requestor)
+    --lcPrint("FindHaulerTask")
+    local resources = StorableResourcesForSession
+    local demand_queues = self.demand_queues
+    local supply_queues = self.supply_queues
+
+    local res_prio, res_s_req, res_d_req, res_resource = min_int, false, false, false
+    for k = 1, #resources do
+        local resource = resources[k]
+        local d_queue = demand_queues[resource]
+        local s_queue = supply_queues[resource] or empty_table
+        for i = 1, #d_queue do
+            local d_req = d_queue[i]
+
+            local d_bld = d_req:GetBuilding()
+
+            local d_prio = CalcDemandPrio(d_req, d_bld, requestor)
+            for j = 1, #s_queue do
+                local s_req = s_queue[j]
+                local s_bld = s_req:GetBuilding()
+                if
+                    s_bld ~= d_bld and s_req:GetTargetAmount() > minimum_resource_amount_treshold and
+                        CheckMinDist(s_bld, d_bld)
+                 then
+                    local s_prio = CalcSupplyPrio(s_req, s_bld, d_req, d_bld, requestor, d_prio)
+                    if res_prio < s_prio then
+                        res_prio, res_s_req, res_d_req, res_resource = s_prio, s_req, d_req, resource
+                    end
+                end
+            end
+        end
+    end
+
+    -- local hystory = self.req_hystory or {}
+    -- self.req_hystory = hystory
+    -- local last_entry = hystory[#hystory]
+    -- local time = GameTime()
+    -- local count = req_count
+    -- local next_idx = last_entry and last_entry:x() == time and #hystory or #hystory + 1
+    -- hystory[next_idx] = point(time, count)
+    -- while #hystory > 10 and time - hystory[1]:x() >= hystory_time do
+    --     table.remove(hystory, 1)
+    -- end
+
+    local best_task = res_prio and {res_prio, res_s_req, res_d_req, res_resource}
+    -- if (best_task) then
+    --     lcPrint(best_task)
+    -- else
+    --     lcPrint("no task assigned :(")
+    -- end
+    return best_task
 end
