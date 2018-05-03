@@ -1,4 +1,4 @@
--- Inspired by akarnokd's excelent AutoCargo: mod (https://github.com/akarnokd/surviving-mars-mods)
+-- Inspired by akarnokd's excelent AutoGatherTransport: mod (https://github.com/akarnokd/surviving-mars-mods)
 -- Parts of this code are based on that mod, specially the game thread, menu and modconfig sections
 
 -- Globals
