@@ -180,12 +180,12 @@ function AutoCargo:DoTasks()
             --lcPrint(rover.command)
 
             if rover.auto_cargo and rover.command == "Idle" then
-                if not rover.auto_cargo_task then
+                if not rover.hauler_task then
                     --lcPrint("getting task")
                     local task = AutoCargo:FindTransportTask(rover)
                     if (task) then
                         --lcPrint("got task")
-                        rover.auto_cargo_task = task
+                        rover.hauler_task = task
                         AutoCargo:Pickup(rover)
                     end
                 else
@@ -228,29 +228,29 @@ end
 function AutoCargo:Pickup(rover)
     local showNotifications = AutoCargo:ConfigShowNotification()
 
-    if not rover.auto_cargo_task then
+    if not rover.hauler_task then
         return
     end
 
-    local resource = rover.auto_cargo_task.resource
-    local amount = rover.auto_cargo_task.amount
+    local resource = rover.hauler_task.resource
+    local amount = rover.hauler_task.amount
 
     if amount <= 0 then
-        rover.auto_cargo_task = false
+        rover.hauler_task = false
         --lcPrint("Pickup cancelled: zero resources requested")
         return
     end
 
-    if not rover.auto_cargo_task.source then
-        rover.auto_cargo_task = false
+    if not rover.hauler_task.source then
+        rover.hauler_task = false
         --lcPrint("Pickup cancelled: invalid source")
         return
     end
 
-    local source = rover.auto_cargo_task.source
+    local source = rover.hauler_task.source
 
     if source:GetStoredAmount(resource) <= 0 then
-        rover.auto_cargo_task = false
+        rover.hauler_task = false
         --lcPrint("Pickup cancelled: no resources at source")
         return
     end
@@ -276,12 +276,12 @@ function AutoCargo:Deliver(rover)
     local showNotifications = AutoCargo:ConfigShowNotification()
 
     --lcPrint("Deliver")
-    if not rover.auto_cargo_task then
+    if not rover.hauler_task then
         return
     end
-    local resource = rover.auto_cargo_task.resource
-    local amount = rover.auto_cargo_task.amount
-    local destination = rover.auto_cargo_task.destination
+    local resource = rover.hauler_task.resource
+    local amount = rover.hauler_task.amount
+    local destination = rover.hauler_task.destination
 
     if rover:GetStoredAmount() > 0 then
         if showNotifications == "all" then
@@ -301,9 +301,9 @@ function AutoCargo:Deliver(rover)
 
         -- Hack to ensure unloading cargo (rover just stops if depot full)
         -- Couldn't figure out a way to find if depot is full
-        if not rover.auto_cargo_task.shouldDump then
+        if not rover.hauler_task.shouldDump then
             rover:SetCommand("TransferAllResources", destination, "unload", rover.storable_resources)
-            rover.auto_cargo_task.shouldDump = true
+            rover.hauler_task.shouldDump = true
         else
             if showNotifications == "problem" then
                 AddCustomOnScreenNotification(
@@ -321,7 +321,7 @@ function AutoCargo:Deliver(rover)
         end
     else
         --lcPrint("Cargo delivered")
-        rover.auto_cargo_task = false
+        rover.hauler_task = false
     end
 end
 
