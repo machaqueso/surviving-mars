@@ -8,6 +8,10 @@ AutoCargo.StringIdBase = 20180406
 -- global queue of transport tasks
 AutoCargo.transport_tasks = {}
 
+local function debug(msg)
+    lcPrint(msg)
+end
+
 function OnMsg.GameTimeStart()
     AutoCargoInstallThread()
 end
@@ -175,16 +179,21 @@ function AutoCargo:DoTasks()
     ForEach {
         class = "RCTransport",
         exec = function(rover)
-            --lcPrint(rover.command)
+            debug(rover.name .. ": " .. rover.command)
 
             if rover.auto_cargo and rover.command == "Idle" then
-                if not rover.hauler_task then
-                    --lcPrint("getting task")
-                    local task = AutoCargo:FindTransportTask(rover)
+                if not rover.transport_task then
+                    --debug("getting task")
+                    local task = LRManagerInstance:FindHaulerTask(rover)
                     if (task) then
-                        --lcPrint("got task")
-                        rover.hauler_task = task
-                        AutoCargo:Pickup(rover)
+                        --debug("got task")
+                        rover.transport_task = task
+                        if AutoCargo:OnTaskAssigned(rover) then
+                            AutoCargo:Pickup(rover)
+                        else
+                            debug("Ignored")
+                            rover.transport_task = false
+                        end
                     end
                 else
                     -- if idle and have a task means it's done picking up cargo
@@ -195,54 +204,67 @@ function AutoCargo:DoTasks()
     }
 end
 
-function AutoCargo:FindTransportTask(rover)
-    local transport_task = LRManagerInstance:FindHaulerTask(rover)
-    if transport_task then
-        local supply_request = transport_task[2]
-        local demand_request = transport_task[3]
-        local resource = transport_task[4]
-        local amount = Min(supply_request:GetTargetAmount(), demand_request:GetTargetAmount())
-
-        local hauler_task = {}
-        hauler_task.source = supply_request:GetBuilding()
-        hauler_task.destination = demand_request:GetBuilding()
-        hauler_task.resource = resource
-        hauler_task.amount = amount
-        lcPrint(
-            amount ..
-                " " .. resource .. " from " .. hauler_task.source.handle .. " to " .. hauler_task.destination.handle
+function AutoCargo:ClearRequests(rover)
+    if rover.assigned_to_d_req then
+        rover.assigned_to_d_req[1]:UnassignUnit(rover.assigned_to_d_req[2], false)
+        rover.assigned_to_d_req[1]:GetBuilding():ChangeDeficit(
+            rover.assigned_to_d_req[1]:GetResource(),
+            -rover.assigned_to_d_req[2]
         )
+        rover.assigned_to_d_req = false
+    end
 
-        return hauler_task
+    if rover.assigned_to_s_req then
+        rover.assigned_to_s_req[1]:UnassignUnit(rover.assigned_to_s_req[2], false)
+        rover.assigned_to_s_req = false
     end
 end
 
 function AutoCargo:Pickup(rover)
-    local showNotifications = AutoCargo:ConfigShowNotification()
+    debug("Pickup")
+    if not rover.transport_task then
+        return
+    end
+    local supply_request = rover.transport_task[2]
+    local demand_request = rover.transport_task[3]
+    local resource = rover.transport_task[4]
+    local amount =
+        rover.assigned_to_s_req and rover.assigned_to_s_req[2] or
+        Min(rover.max_shared_storage, supply_request:GetTargetAmount(), demand_request:GetTargetAmount())
 
-    if not rover.hauler_task then
+    if amount <= 0 then
         return
     end
 
-    local resource = rover.hauler_task.resource
-    local amount = rover.hauler_task.amount
+    if not rover.assigned_to_s_req and not supply_request:AssignUnit(amount) then
+        return false
+    end
+
+    if not rover.assigned_to_d_req and not demand_request:AssignUnit(amount) then
+        supply_request:UnassignUnit(amount, false)
+        rover.assigned_to_s_req = false
+        return false
+    end
+
+    rover.assigned_to_s_req = rover.assigned_to_s_req or {supply_request, amount}
+    rover.assigned_to_d_req = rover.assigned_to_d_req or {demand_request, amount}
 
     if amount <= 0 then
-        rover.hauler_task = false
+        rover.transport_task = false
         --lcPrint("Pickup cancelled: zero resources requested")
         return
     end
 
-    if not rover.hauler_task.source then
-        rover.hauler_task = false
+    local source = supply_request:GetBuilding()
+
+    if not source then
+        rover.transport_task = false
         --lcPrint("Pickup cancelled: invalid source")
         return
     end
 
-    local source = rover.hauler_task.source
-
     if source:GetStoredAmount(resource) <= 0 then
-        rover.hauler_task = false
+        rover.transport_task = false
         --lcPrint("Pickup cancelled: no resources at source")
         return
     end
@@ -254,32 +276,45 @@ function AutoCargo:Pickup(rover)
 end
 
 function AutoCargo:Deliver(rover)
-    local showNotifications = AutoCargo:ConfigShowNotification()
+    debug("Deliver")
 
-    --lcPrint("Deliver")
-    if not rover.hauler_task then
+    if not rover.transport_task then
         return
     end
-    local resource = rover.hauler_task.resource
-    local amount = rover.hauler_task.amount
-    local destination = rover.hauler_task.destination
+    local demand_request = rover.transport_task[3]
+    local resource = rover.transport_task[4]
+    local amount = rover.assigned_to_d_req and rover.assigned_to_d_req[2] or rover:GetStoredAmount()
 
-    if rover:GetStoredAmount() > 0 then
-        AutoCargo:Notify(rover, "all", "AutoCargoDeliver", 27, "AutoCargo delivering " .. resource)
-        SetUnitControlInteractionMode(rover, false)
-
-        -- Hack to ensure unloading cargo (rover just stops if depot full)
-        -- Couldn't figure out a way to find if depot is full
-        if not rover.hauler_task.shouldDump then
-            rover:SetCommand("TransferAllResources", destination, "unload", rover.storable_resources)
-            rover.hauler_task.shouldDump = true
-        else
-            AutoCargo:Notify(rover, "problem", "AutoCargoDepotFull", 28, "Depot full, dumping " .. resource)
-            rover:SetCommand("DumpCargo", destination:GetPos(), "all")
+    if rover:GetStoredAmount() <= 0 then --we did not pickup anything?
+        if rover.assigned_to_d_req then
+            demand_request:UnassignUnit(amount, false)
+            demand_request:GetBuilding():ChangeDeficit(resource, -amount)
+            rover.assigned_to_d_req = false
         end
+        rover.transport_task = false
+        AutoCargo:ClearRequests(rover)
+        return
+    elseif not rover.assigned_to_d_req then
+        if not demand_request:AssignUnit(amount) then
+            return
+        end
+
+        rover.assigned_to_d_req = {demand_request, amount}
+    end
+
+    local destination = demand_request:GetBuilding()
+
+    AutoCargo:Notify(rover, "all", "AutoCargoDeliver", 27, "AutoCargo delivering " .. resource)
+    SetUnitControlInteractionMode(rover, false)
+
+    -- Hack to ensure unloading cargo (rover just stops if depot full)
+    -- Couldn't figure out a way to find if depot is full
+    if not rover.transport_task.shouldDump then
+        rover:SetCommand("TransferAllResources", destination, "unload", rover.storable_resources)
+        rover.transport_task.sshouldDump = true
     else
-        --lcPrint("Cargo delivered")
-        rover.hauler_task = false
+        AutoCargo:Notify(rover, "problem", "AutoCargoDepotFull", 28, "Depot full, dumping " .. resource)
+        rover:SetCommand("DumpCargo", destination:GetPos(), "all")
     end
 end
 
@@ -303,7 +338,6 @@ end
 -- Adapted from ShuttleHub.Lua
 function AutoCargo:OnTaskAssigned(rover)
     assert(not rover.assigned_to_s_req and not rover.assigned_to_d_req)
-    rover.is_colonist_transport_task = false
     local supply_request = rover.transport_task[2]
     local demand_request = rover.transport_task[3]
     local resource = rover.transport_task[4]
@@ -312,6 +346,13 @@ function AutoCargo:OnTaskAssigned(rover)
         rover.max_shared_storage,
         supply_request and supply_request:GetTargetAmount() or max_int,
         demand_request:GetTargetAmount()
+    )
+
+    debug(
+        amount ..
+            " " ..
+                resource ..
+                    " from " .. supply_request:GetBuilding().handle .. " to " .. demand_request:GetBuilding().handle
     )
 
     --assign early so cc's updating their deficit will see us
