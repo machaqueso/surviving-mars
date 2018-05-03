@@ -208,7 +208,10 @@ function AutoCargo:FindTransportTask(rover)
         hauler_task.destination = demand_request:GetBuilding()
         hauler_task.resource = resource
         hauler_task.amount = amount
-        lcPrint(amount.." "..resource.." from "..hauler_task.source.handle.." to "..hauler_task.destination.handle)
+        lcPrint(
+            amount ..
+                " " .. resource .. " from " .. hauler_task.source.handle .. " to " .. hauler_task.destination.handle
+        )
 
         return hauler_task
     end
@@ -244,18 +247,7 @@ function AutoCargo:Pickup(rover)
         return
     end
 
-    if showNotifications == "all" then
-        AddCustomOnScreenNotification(
-            "AutoCargoPickup",
-            T {rover.name},
-            T {AutoCargo.StringIdBase + 26, "AutoCargo picking up " .. resource},
-            "UI/Icons/Upgrades/service_bots_02.tga",
-            false,
-            {
-                expiration = 15000
-            }
-        )
-    end
+    AutoCargo:Notify(rover, "all", "AutoCargoPickup", 26, "AutoCargo picking up " .. resource)
 
     SetUnitControlInteractionMode(rover, false)
     rover:SetCommand("TransferResources", source, "load", resource, amount)
@@ -273,19 +265,7 @@ function AutoCargo:Deliver(rover)
     local destination = rover.hauler_task.destination
 
     if rover:GetStoredAmount() > 0 then
-        if showNotifications == "all" then
-            AddCustomOnScreenNotification(
-                "AutoCargoDeliver",
-                T {rover.name},
-                T {AutoCargo.StringIdBase + 27, "AutoCargo delivering " .. resource},
-                "UI/Icons/Upgrades/service_bots_02.tga",
-                false,
-                {
-                    expiration = 15000
-                }
-            )
-        end
-
+        AutoCargo:Notify(rover, "all", "AutoCargoDeliver", 27, "AutoCargo delivering " .. resource)
         SetUnitControlInteractionMode(rover, false)
 
         -- Hack to ensure unloading cargo (rover just stops if depot full)
@@ -294,18 +274,7 @@ function AutoCargo:Deliver(rover)
             rover:SetCommand("TransferAllResources", destination, "unload", rover.storable_resources)
             rover.hauler_task.shouldDump = true
         else
-            if showNotifications == "problem" then
-                AddCustomOnScreenNotification(
-                    "AutoCargoDeliverFull",
-                    T {rover.name},
-                    T {AutoCargo.StringIdBase + 28, "Depot full of " .. resource},
-                    "UI/Icons/Upgrades/service_bots_02.tga",
-                    false,
-                    {
-                        expiration = 15000
-                    }
-                )
-            end
+            AutoCargo:Notify(rover, "problem", "AutoCargoDepotFull", 28, "Depot full, dumping " .. resource)
             rover:SetCommand("DumpCargo", destination:GetPos(), "all")
         end
     else
@@ -314,10 +283,58 @@ function AutoCargo:Deliver(rover)
     end
 end
 
+function AutoCargo:Notify(rover, level, title, messageId, message)
+    local showNotifications = AutoCargo:ConfigShowNotification()
+
+    if showNotifications == level then
+        AddCustomOnScreenNotification(
+            title,
+            T {rover.name},
+            T {AutoCargo.StringIdBase + messageId, message},
+            "UI/Icons/Upgrades/service_bots_02.tga",
+            false,
+            {
+                expiration = 5000
+            }
+        )
+    end
+end
+
+-- Adapted from ShuttleHub.Lua
+function AutoCargo:OnTaskAssigned(rover)
+    assert(not rover.assigned_to_s_req and not rover.assigned_to_d_req)
+    rover.is_colonist_transport_task = false
+    local supply_request = rover.transport_task[2]
+    local demand_request = rover.transport_task[3]
+    local resource = rover.transport_task[4]
+    local amount =
+        Min(
+        rover.max_shared_storage,
+        supply_request and supply_request:GetTargetAmount() or max_int,
+        demand_request:GetTargetAmount()
+    )
+
+    --assign early so cc's updating their deficit will see us
+    if amount <= 0 or (supply_request and not supply_request:AssignUnit(amount)) then
+        return false
+    end
+
+    if not demand_request:AssignUnit(amount) then
+        if supply_request then
+            supply_request:UnassignUnit(amount, false)
+        end
+        return false
+    end
+
+    rover.assigned_to_s_req = supply_request and {supply_request, amount} or false
+    rover.assigned_to_d_req = {demand_request, amount}
+    demand_request:GetBuilding():ChangeDeficit(resource, amount)
+
+    return true
+end
 
 --[[
-    CODE BELOW COPIED FROM LRTransport.Lua
-    Stripped down version of LRManagerInstance:FindTransportTask()
+    CODE BELOW BASED ON LRTransport.Lua
 ]]
 local minimum_resource_amount_treshold = const.TransportMinResAmountTreshold
 local dist_threshold = const.TransportDistThreshold
@@ -351,6 +368,7 @@ local function CheckMinDist(bld1, bld2)
     return true
 end
 
+-- Stripped down version of LRManagerInstance:FindTransportTask()
 function LRManagerInstance:FindHaulerTask(requestor)
     --lcPrint("FindHaulerTask")
     local resources = StorableResourcesForSession
