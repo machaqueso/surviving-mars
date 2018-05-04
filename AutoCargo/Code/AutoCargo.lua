@@ -33,10 +33,10 @@ function AutoCargoInstallThread()
     )
 end
 
--- function OnMsg.NewHour()
+function OnMsg.NewHour()
 --     debug("NewHour")
---     AutoCargo:DoTasks()
--- end
+    AutoCargo:DoTasks()
+end
 
 -- Setup UI
 function OnMsg.ClassesBuilt()
@@ -436,7 +436,7 @@ end
 
 -- Stripped down version of LRManagerInstance:FindTransportTask()
 function LRManager:FindHaulerTask(requestor, demand_only)
-    lcPrint("FindHaulerTask")
+    --lcPrint("FindHaulerTask")
     local resources = StorableResourcesForSession
     local demand_queues = self.demand_queues
     local supply_queues = self.supply_queues
