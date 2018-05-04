@@ -9,7 +9,7 @@ AutoCargo.StringIdBase = 20180406
 AutoCargo.transport_tasks = {}
 
 local function debug(msg)
-    lcPrint(msg)
+    --lcPrint(msg)
 end
 
 function OnMsg.GameTimeStart()
@@ -33,10 +33,10 @@ function AutoCargoInstallThread()
     )
 end
 
-function OnMsg.NewHour()
-    debug("NewHour")
-    AutoCargo:DoTasks()
-end
+-- function OnMsg.NewHour()
+--     debug("NewHour")
+--     AutoCargo:DoTasks()
+-- end
 
 -- Setup UI
 function OnMsg.ClassesBuilt()
@@ -279,11 +279,16 @@ function AutoCargo:Pickup(rover)
         return
     end
 
-    if source:GetStoredAmount(resource) <= 0 then
+    local stored_amount = source:GetStoredAmount(resource)
+
+    if stored_amount <= 0 then
         rover.transport_task = false
         --lcPrint("Pickup cancelled: no resources at source")
         return
     end
+
+    -- hack: don't take more than half the stash
+    amount = Min(amount, stored_amount/2)
 
     AutoCargo:Notify(rover, "all", "AutoCargoPickup", 26, "AutoCargo picking up " .. resource)
 
@@ -406,6 +411,10 @@ local function d_to_prio(d)
 end
 
 local function CalcDemandPrio(req, bld, requestor)
+    if bld:GetStoredAmount(req:GetResource()) == 0 then
+        return max_int
+    end
+
     local d = bld:GetDist2D(requestor)
     --time since serviced, dist (closer is better), if any resource set to import + 100000 + needed amount
     return t_to_prio(now() - req:GetLastServiced()) + req:GetTargetAmount() + d_to_prio(d)
@@ -444,6 +453,10 @@ function LRManager:FindHaulerTask(requestor, demand_only)
                 local d_bld = d_req:GetBuilding()
 
                 local d_prio = CalcDemandPrio(d_req, d_bld, requestor)
+                -- if d_bld:GetStoredAmount(resource) > minimum_resource_amount_treshold then
+                --     d_prio = d_prio / 10
+                -- end
+
                 if not demand_only then
                     for j = 1, #s_queue do
                         local s_req = s_queue[j]
@@ -457,7 +470,15 @@ function LRManager:FindHaulerTask(requestor, demand_only)
                             if res_prio < s_prio then
                                 res_prio, res_s_req, res_d_req, res_resource = s_prio, s_req, d_req, resource
                             end
-                            debug("|        "..res_resource.."      |   "..res_d_req:GetBuilding().handle.."    |   "..res_d_req:GetTargetAmount().."    |   "..d_prio.."  |   "..res_prio.."    |")
+                            -- debug(
+                            --     "|        " ..
+                            --         res_resource ..
+                            --             "      |   " ..
+                            --                 res_d_req:GetBuilding().handle ..
+                            --                     "    |   " ..
+                            --                         res_d_req:GetTargetAmount() ..
+                            --                             "    |   " .. d_prio .. "  |   " .. res_prio .. "    |"
+                            -- )
                         end
                     end
                 elseif res_prio < d_prio then
