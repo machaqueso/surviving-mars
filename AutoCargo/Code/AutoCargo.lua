@@ -24,7 +24,7 @@ function AutoCargoInstallThread()
     CreateGameTimeThread(
         function()
             while true do
-                --lcPrint("Ping")
+                debug("Thread Loop")
                 AutoCargo:DoTasks()
                 local period = AutoCargo:ConfigUpdatePeriod()
                 Sleep(tonumber(period))
@@ -34,7 +34,7 @@ function AutoCargoInstallThread()
 end
 
 function OnMsg.NewHour()
-    --lcPrint("NewHour")
+    debug("NewHour")
     AutoCargo:DoTasks()
 end
 
@@ -171,6 +171,22 @@ function OnMsg.ModConfigReady()
     )
 end
 
+function debugTask(transport_task)
+    local supply_request = transport_task[2]
+    local demand_request = transport_task[3]
+    local resource = transport_task[4]
+    debug("--- transport task ---")
+    debug(
+        "Demand request: " ..
+            demand_request:GetTargetAmount() .. " " .. resource .. " to " .. demand_request:GetBuilding().handle
+    )
+    debug(
+        "Supply request: " ..
+            supply_request:GetTargetAmount() .. " " .. resource .. " from " .. supply_request:GetBuilding().handle
+    )
+    debug("----------------------")
+end
+
 function AutoCargo:DoTasks()
     if not mapdata.GameLogic then
         return
@@ -179,13 +195,13 @@ function AutoCargo:DoTasks()
     ForEach {
         class = "RCTransport",
         exec = function(rover)
-            debug(rover.name .. ": " .. rover.command)
-
             if rover.auto_cargo and rover.command == "Idle" then
+                debug(rover.name .. ": " .. rover.command)
                 if not rover.transport_task then
                     --debug("getting task")
                     local task = LRManagerInstance:FindHaulerTask(rover)
                     if (task) then
+                        debugTask(task)
                         --debug("got task")
                         rover.transport_task = task
                         if AutoCargo:OnTaskAssigned(rover) then
@@ -311,7 +327,7 @@ function AutoCargo:Deliver(rover)
     -- Couldn't figure out a way to find if depot is full
     if not rover.transport_task.shouldDump then
         rover:SetCommand("TransferAllResources", destination, "unload", rover.storable_resources)
-        rover.transport_task.sshouldDump = true
+        rover.transport_task.shouldDump = true
     else
         AutoCargo:Notify(rover, "problem", "AutoCargoDepotFull", 28, "Depot full, dumping " .. resource)
         rover:SetCommand("DumpCargo", destination:GetPos(), "all")
@@ -329,7 +345,7 @@ function AutoCargo:Notify(rover, level, title, messageId, message)
             "UI/Icons/Upgrades/service_bots_02.tga",
             false,
             {
-                expiration = 5000
+                expiration = 8000
             }
         )
     end
@@ -410,34 +426,42 @@ local function CheckMinDist(bld1, bld2)
 end
 
 -- Stripped down version of LRManagerInstance:FindTransportTask()
-function LRManagerInstance:FindHaulerTask(requestor)
-    --lcPrint("FindHaulerTask")
+function LRManager:FindHaulerTask(requestor, demand_only)
+    lcPrint("FindHaulerTask")
     local resources = StorableResourcesForSession
     local demand_queues = self.demand_queues
     local supply_queues = self.supply_queues
 
     local res_prio, res_s_req, res_d_req, res_resource = min_int, false, false, false
+    debug("|        Resource        |   d_bld   |   d_qty   |   d_prio  |   res_prio    |")
     for k = 1, #resources do
         local resource = resources[k]
         local d_queue = demand_queues[resource]
         local s_queue = supply_queues[resource] or empty_table
         for i = 1, #d_queue do
             local d_req = d_queue[i]
+            if d_req:CanAssignUnit() then
+                local d_bld = d_req:GetBuilding()
 
-            local d_bld = d_req:GetBuilding()
-
-            local d_prio = CalcDemandPrio(d_req, d_bld, requestor)
-            for j = 1, #s_queue do
-                local s_req = s_queue[j]
-                local s_bld = s_req:GetBuilding()
-                if
-                    s_bld ~= d_bld and s_req:GetTargetAmount() > minimum_resource_amount_treshold and
-                        CheckMinDist(s_bld, d_bld)
-                 then
-                    local s_prio = CalcSupplyPrio(s_req, s_bld, d_req, d_bld, requestor, d_prio)
-                    if res_prio < s_prio then
-                        res_prio, res_s_req, res_d_req, res_resource = s_prio, s_req, d_req, resource
+                local d_prio = CalcDemandPrio(d_req, d_bld, requestor)
+                if not demand_only then
+                    for j = 1, #s_queue do
+                        local s_req = s_queue[j]
+                        local s_bld = s_req:GetBuilding()
+                        if
+                            s_bld ~= d_bld and s_req:GetTargetAmount() > minimum_resource_amount_treshold and
+                                CheckMinDist(s_bld, d_bld)
+                         then
+                            local s_prio = CalcSupplyPrio(s_req, s_bld, d_req, d_bld, requestor, d_prio)
+                            --debug("|    "..resource.."    |   "..d_bld.handle.."    |   "..d_req:GetTargetAmount().."    |   "..d_prio.."  |   "..res_prio.."    |")
+                            if res_prio < s_prio then
+                                res_prio, res_s_req, res_d_req, res_resource = s_prio, s_req, d_req, resource
+                            end
+                            debug("|        "..res_resource.."      |   "..res_d_req:GetBuilding().handle.."    |   "..res_d_req:GetTargetAmount().."    |   "..d_prio.."  |   "..res_prio.."    |")
+                        end
                     end
+                elseif res_prio < d_prio then
+                    res_prio, res_d_req, res_resource = d_prio, d_req, resource
                 end
             end
         end
