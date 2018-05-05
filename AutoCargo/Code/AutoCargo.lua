@@ -34,7 +34,7 @@ function AutoCargoInstallThread()
 end
 
 function OnMsg.NewHour()
---     debug("NewHour")
+    --     debug("NewHour")
     AutoCargo:DoTasks()
 end
 
@@ -197,27 +197,49 @@ function AutoCargo:DoTasks()
         exec = function(rover)
             if rover.auto_cargo and rover.command == "Idle" then
                 debug(rover.name .. ": " .. rover.command)
-                if not rover.transport_task then
-                    --debug("getting task")
-                    local task = LRManagerInstance:FindHaulerTask(rover)
-                    if (task) then
-                        debugTask(task)
-                        --debug("got task")
-                        rover.transport_task = task
-                        if AutoCargo:OnTaskAssigned(rover) then
-                            AutoCargo:Pickup(rover)
-                        else
-                            debug("Ignored")
-                            rover.transport_task = false
-                        end
-                    end
+
+                if rover:IsLowBattery() then
+                    AutoCargo:Recharge(rover)
                 else
-                    -- if idle and have a task means it's done picking up cargo
-                    AutoCargo:Deliver(rover)
+                    if not rover.transport_task then
+                        --debug("getting task")
+                        local task = LRManagerInstance:FindHaulerTask(rover)
+                        if (task) then
+                            debugTask(task)
+                            --debug("got task")
+                            rover.transport_task = task
+                            if AutoCargo:OnTaskAssigned(rover) then
+                                AutoCargo:Pickup(rover)
+                            else
+                                debug("Ignored")
+                                rover.transport_task = false
+                            end
+                        end
+                    else
+                        -- if idle and have a task means it's done picking up cargo
+                        AutoCargo:Deliver(rover)
+                    end
                 end
             end
         end
     }
+end
+
+function AutoCargo:Recharge(rover)
+    local i
+    -- increase the search radius up to 10 times a drone hub's range trying to find cable
+    for i = 1, 10, 1 do
+        local c = rover:GetCableNearby(const.CommandCenterDefaultRadius * i)
+        if
+            c and
+                c.electricity.grid.current_reserve >=
+                    rover.battery_hourly_recharge_rate / const.RoverToGridElectricityScale
+         then
+            rover:InteractWithObject(c, "recharge")
+            return
+        end
+    end
+    AutoCargo:Notify(rover, "problem", "AutoCargoRechargeNotFound", 29, "Could not find a recharge spot.")
 end
 
 function AutoCargo:ClearRequests(rover)
@@ -288,7 +310,7 @@ function AutoCargo:Pickup(rover)
     end
 
     -- hack: don't take more than half the stash
-    amount = Min(amount, stored_amount/2)
+    amount = Min(amount, stored_amount / 2)
 
     AutoCargo:Notify(rover, "all", "AutoCargoPickup", 26, "AutoCargo picking up " .. resource)
 
@@ -470,15 +492,15 @@ function LRManager:FindHaulerTask(requestor, demand_only)
                             if res_prio < s_prio then
                                 res_prio, res_s_req, res_d_req, res_resource = s_prio, s_req, d_req, resource
                             end
-                            -- debug(
-                            --     "|        " ..
-                            --         res_resource ..
-                            --             "      |   " ..
-                            --                 res_d_req:GetBuilding().handle ..
-                            --                     "    |   " ..
-                            --                         res_d_req:GetTargetAmount() ..
-                            --                             "    |   " .. d_prio .. "  |   " .. res_prio .. "    |"
-                            -- )
+                        -- debug(
+                        --     "|        " ..
+                        --         res_resource ..
+                        --             "      |   " ..
+                        --                 res_d_req:GetBuilding().handle ..
+                        --                     "    |   " ..
+                        --                         res_d_req:GetTargetAmount() ..
+                        --                             "    |   " .. d_prio .. "  |   " .. res_prio .. "    |"
+                        -- )
                         end
                     end
                 elseif res_prio < d_prio then
