@@ -236,7 +236,13 @@ function AutoCargo:Recharge(rover)
         rover:InteractWithObject(c, "recharge")
         return
     end
-    AutoCargo:Notify(rover, "problem", "AutoCargoNearbyCableNoPower", 30, "Cannot recharge: Not enough power on nearest cable.")
+    AutoCargo:Notify(
+        rover,
+        "problem",
+        "AutoCargoNearbyCableNoPower",
+        30,
+        "Cannot recharge: Not enough power on nearest cable."
+    )
 end
 
 function AutoCargo:ClearRequests(rover)
@@ -286,7 +292,7 @@ function AutoCargo:Pickup(rover)
 
     if amount <= 0 then
         rover.transport_task = false
-        --lcPrint("Pickup cancelled: zero resources requested")
+        AutoCargo:ClearRequests(rover)
         return
     end
 
@@ -294,20 +300,16 @@ function AutoCargo:Pickup(rover)
 
     if not source then
         rover.transport_task = false
-        --lcPrint("Pickup cancelled: invalid source")
+        AutoCargo:ClearRequests(rover)
         return
     end
 
     local stored_amount = source:GetStoredAmount(resource)
-
     if stored_amount <= 0 then
         rover.transport_task = false
-        --lcPrint("Pickup cancelled: no resources at source")
+        AutoCargo:ClearRequests(rover)
         return
     end
-
-    -- hack: don't take more than half the stash
-    amount = Min(amount, stored_amount / 2)
 
     AutoCargo:Notify(rover, "all", "AutoCargoPickup", 26, "AutoCargo picking up " .. resource)
 
@@ -381,11 +383,22 @@ function AutoCargo:OnTaskAssigned(rover)
     local supply_request = rover.transport_task[2]
     local demand_request = rover.transport_task[3]
     local resource = rover.transport_task[4]
+
+    -- rules to avoid some bonehead transfers
+    local supply_depot_amount = supply_request:GetBuilding():GetStoredAmount(resource)
+    local dest_depot_amount = demand_request:GetBuilding():GetStoredAmount(resource)
+    local average = (supply_depot_amount + dest_depot_amount) / 2
+    if (dest_depot_amount >= supply_depot_amount) or (dest_depot_amount >= average) then
+        -- destination has more of this resource than source, or more than avg between both
+        return false
+    end
+
     local amount =
         Min(
         rover.max_shared_storage,
         supply_request and supply_request:GetTargetAmount() or max_int,
-        demand_request:GetTargetAmount()
+        demand_request:GetTargetAmount(),
+        average - dest_depot_amount -- try to average depots, so only take enough units to have same amount in both
     )
 
     debug(
@@ -410,6 +423,9 @@ function AutoCargo:OnTaskAssigned(rover)
     rover.assigned_to_s_req = supply_request and {supply_request, amount} or false
     rover.assigned_to_d_req = {demand_request, amount}
     demand_request:GetBuilding():ChangeDeficit(resource, amount)
+
+    -- save last supply to prevent taking stuff back to it
+    rover.last_autocargo_supply = supply_request:GetBuilding()
 
     return true
 end
@@ -486,7 +502,7 @@ function LRManager:FindHaulerTask(requestor, demand_only)
                          then
                             local s_prio = CalcSupplyPrio(s_req, s_bld, d_req, d_bld, requestor, d_prio)
                             --debug("|    "..resource.."    |   "..d_bld.handle.."    |   "..d_req:GetTargetAmount().."    |   "..d_prio.."  |   "..res_prio.."    |")
-                            if res_prio < s_prio then
+                            if res_prio < s_prio and d_bld:GetStoredAmount(resource) < s_bld:GetStoredAmount(resource) then
                                 res_prio, res_s_req, res_d_req, res_resource = s_prio, s_req, d_req, resource
                             end
                         -- debug(
