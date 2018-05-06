@@ -226,20 +226,17 @@ function AutoCargo:DoTasks()
 end
 
 function AutoCargo:Recharge(rover)
-    local i
-    -- increase the search radius up to 10 times a drone hub's range trying to find cable
-    for i = 1, 10, 1 do
-        local c = rover:GetCableNearby(const.CommandCenterDefaultRadius * i)
-        if
-            c and
-                c.electricity.grid.current_reserve >=
-                    rover.battery_hourly_recharge_rate / const.RoverToGridElectricityScale
-         then
-            rover:InteractWithObject(c, "recharge")
-            return
-        end
+    local c = rover:GetCableNearby(const.CommandCenterDefaultRadius)
+    if not c then
+        AutoCargo:Notify(rover, "problem", "AutoCargoNoCableNearby", 29, "Cannot recharge: no cables nearby.")
+        return
     end
-    AutoCargo:Notify(rover, "problem", "AutoCargoRechargeNotFound", 29, "Could not find a recharge spot.")
+
+    if c.electricity.grid.current_reserve >= rover.battery_hourly_recharge_rate / const.RoverToGridElectricityScale then
+        rover:InteractWithObject(c, "recharge")
+        return
+    end
+    AutoCargo:Notify(rover, "problem", "AutoCargoNearbyCableNoPower", 30, "Cannot recharge: Not enough power on nearest cable.")
 end
 
 function AutoCargo:ClearRequests(rover)
@@ -364,7 +361,7 @@ end
 function AutoCargo:Notify(rover, level, title, messageId, message)
     local showNotifications = AutoCargo:ConfigShowNotification()
 
-    if showNotifications == level then
+    if showNotifications == "all" or showNotifications == level then
         AddCustomOnScreenNotification(
             title,
             T {rover.name},
