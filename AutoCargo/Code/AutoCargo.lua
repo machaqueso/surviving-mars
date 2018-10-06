@@ -198,52 +198,29 @@ function AutoCargo:DoTasks()
             if rover.auto_cargo and rover.command == "Idle" then
                 debug(rover.name .. ": " .. rover.command)
 
-                if rover:IsLowBattery() then
-                    AutoCargo:Recharge(rover)
-                else
-                    if not rover.transport_task then
-                        --debug("getting task")
-                        local task = LRManagerInstance:FindHaulerTask(rover)
-                        if (task) then
-                            debugTask(task)
-                            --debug("got task")
-                            rover.transport_task = task
-                            if AutoCargo:OnTaskAssigned(rover) then
-                                AutoCargo:Pickup(rover)
-                            else
-                                debug("Ignored")
-                                rover.transport_task = false
-                            end
+                if not rover.transport_task then
+                    --debug("getting task")
+                    local task = LRManagerInstance:FindHaulerTask(rover)
+                    if (task) then
+                        debugTask(task)
+                        --debug("got task")
+                        rover.transport_task = task
+                        if AutoCargo:OnTaskAssigned(rover) then
+                            AutoCargo:Pickup(rover)
+                        else
+                            debug("Ignored")
+                            rover.transport_task = false
                         end
-                    else
-                        -- if idle and have a task means it's done picking up cargo
-                        AutoCargo:Deliver(rover)
                     end
+                else
+                    -- if idle and have a task means it's done picking up cargo
+                    AutoCargo:Deliver(rover)
                 end
             end
         end
     }
 end
 
-function AutoCargo:Recharge(rover)
-    local c = rover:GetCableNearby(const.CommandCenterDefaultRadius)
-    if not c then
-        AutoCargo:Notify(rover, "problem", "AutoCargoNoCableNearby", 29, "Cannot recharge: no cables nearby.")
-        return
-    end
-
-    if c.electricity.grid.current_reserve >= rover.battery_hourly_recharge_rate / const.RoverToGridElectricityScale then
-        rover:InteractWithObject(c, "recharge")
-        return
-    end
-    AutoCargo:Notify(
-        rover,
-        "problem",
-        "AutoCargoNearbyCableNoPower",
-        30,
-        "Cannot recharge: Not enough power on nearest cable."
-    )
-end
 
 function AutoCargo:ClearRequests(rover)
     if rover.assigned_to_d_req then
